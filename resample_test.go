@@ -29,16 +29,16 @@ func TestResample(t *testing.T) {
 	}
 }
 
-func resampleCorrect(quality int, old, new beep.SampleRate, p [][2]float64) [][2]float64 {
+func resampleCorrect[S Size, P Point[S]](quality int, old, new beep.SampleRate, p []P) []P {
 	ratio := float64(old) / float64(new)
 	pts := make([]point, quality*2)
-	var resampled [][2]float64
+	var resampled []P
 	for i := 0; ; i++ {
 		j := float64(i) * ratio
 		if int(j) >= len(p) {
 			break
 		}
-		var sample [2]float64
+		var sample P
 		for c := range sample {
 			for k := range pts {
 				l := int(j) + k - len(pts)/2 + 1

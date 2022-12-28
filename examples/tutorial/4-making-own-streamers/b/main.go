@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -11,10 +12,10 @@ import (
 )
 
 type Queue struct {
-	streamers []beep.Streamer
+	streamers []beep.Streamer[float64, [2]float64]
 }
 
-func (q *Queue) Add(streamers ...beep.Streamer) {
+func (q *Queue) Add(streamers ...beep.Streamer[float64, [2]float64]) {
 	q.streamers = append(q.streamers, streamers...)
 }
 
@@ -51,11 +52,15 @@ func (q *Queue) Err() error {
 
 func main() {
 	sr := beep.SampleRate(44100)
-	speaker.Init(sr, sr.N(time.Second/10))
+	player, err := speaker.New[float64, [2]float64](sr, sr.N(time.Second/10))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer player.Close()
 
 	// A zero Queue is an empty Queue.
 	var queue Queue
-	speaker.Play(&queue)
+	player.Play(&queue)
 
 	for {
 		var name string
@@ -70,7 +75,7 @@ func main() {
 		}
 
 		// Decode it.
-		streamer, format, err := mp3.Decode(f)
+		streamer, format, err := mp3.Decode[float64, [2]float64](f)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -78,11 +83,11 @@ func main() {
 
 		// The speaker's sample rate is fixed at 44100. Therefore, we need to
 		// resample the file in case it's in a different sample rate.
-		resampled := beep.Resample(4, format.SampleRate, sr, streamer)
+		resampled := beep.Resample[float64, [2]float64](4, format.SampleRate, sr, streamer)
 
 		// And finally, we add the song to the queue.
-		speaker.Lock()
+		player.Lock()
 		queue.Add(resampled)
-		speaker.Unlock()
+		player.Unlock()
 	}
 }

@@ -13,7 +13,7 @@ import (
 // Encode writes all audio streamed from s to w in WAVE format.
 //
 // Format precision must be 1 or 2 bytes.
-func Encode(w io.WriteSeeker, s beep.Streamer, format beep.Format) (err error) {
+func Encode[S beep.Size, P beep.Point[S]](w io.WriteSeeker, s beep.Streamer[S, P], format beep.Format[S, P]) (err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "wav")
@@ -48,7 +48,7 @@ func Encode(w io.WriteSeeker, s beep.Streamer, format beep.Format) (err error) {
 
 	var (
 		bw      = bufio.NewWriter(w)
-		samples = make([][2]float64, 512)
+		samples = make([]P, 512)
 		buffer  = make([]byte, len(samples)*format.Width())
 		written int
 	)

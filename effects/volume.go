@@ -18,8 +18,8 @@ import (
 //
 // With exponential gain it's impossible to achieve the zero volume. When Silent field is set to
 // true, the output is muted.
-type Volume struct {
-	Streamer beep.Streamer
+type Volume[S beep.Size, P beep.Point[S]] struct {
+	Streamer beep.Streamer[S, P]
 	Base     float64
 	Volume   float64
 	Silent   bool
@@ -27,20 +27,20 @@ type Volume struct {
 
 // Stream streams the wrapped Streamer with volume adjusted according to Base, Volume and Silent
 // fields.
-func (v *Volume) Stream(samples [][2]float64) (n int, ok bool) {
+func (v *Volume[S, P]) Stream(samples []P) (n int, ok bool) {
 	n, ok = v.Streamer.Stream(samples)
 	gain := 0.0
 	if !v.Silent {
 		gain = math.Pow(v.Base, v.Volume)
 	}
 	for i := range samples[:n] {
-		samples[i][0] *= gain
-		samples[i][1] *= gain
+		samples[i][0] *= S(gain)
+		samples[i][1] *= S(gain)
 	}
 	return n, ok
 }
 
 // Err propagates the wrapped Streamer's errors.
-func (v *Volume) Err() error {
+func (v *Volume[S, P]) Err() error {
 	return v.Streamer.Err()
 }

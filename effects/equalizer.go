@@ -10,27 +10,27 @@ type (
 
 	// This parametric equalizer is based on the GK Nilsen's post at:
 	// https://octovoid.com/2017/11/04/coding-a-parametric-equalizer-for-audio-applications/
-	equalizer struct {
-		streamer beep.Streamer
-		sections []section
+	equalizer[S beep.Size, P beep.Point[S]] struct {
+		streamer beep.Streamer[S, P]
+		sections []section[S, P]
 	}
 
-	section struct {
-		a, b         [2][]float64
-		xPast, yPast [][2]float64
+	section[S beep.Size, P beep.Point[S]] struct {
+		a, b         [2][]S
+		xPast, yPast []P
 	}
 
 	// EqualizerSections is the interfacd that is passed into NewEqualizer
-	EqualizerSections interface {
-		sections(fs float64) []section
+	EqualizerSections[S beep.Size, P beep.Point[S]] interface {
+		sections(fs float64) []section[S, P]
 	}
 
-	StereoEqualizerSection struct {
-		Left  MonoEqualizerSection
-		Right MonoEqualizerSection
+	StereoEqualizerSection[S beep.Size, P beep.Point[S]] struct {
+		Left  MonoEqualizerSection[S, P]
+		Right MonoEqualizerSection[S, P]
 	}
 
-	MonoEqualizerSection struct {
+	MonoEqualizerSection[S beep.Size, P beep.Point[S]] struct {
 		// F0 (center frequency) sets the mid-point of the section’s
 		// frequency range and is given in Hertz [Hz].
 		F0 float64
@@ -64,31 +64,31 @@ type (
 	}
 
 	// StereoEqualizerSections implements EqualizerSections and can be passed into NewEqualizer
-	StereoEqualizerSections []StereoEqualizerSection
+	StereoEqualizerSections[S beep.Size, P beep.Point[S]] []StereoEqualizerSection[S, P]
 
 	// MonoEqualizerSections implements EqualizerSections and can be passed into NewEqualizer
-	MonoEqualizerSections []MonoEqualizerSection
+	MonoEqualizerSections[S beep.Size, P beep.Point[S]] []MonoEqualizerSection[S, P]
 )
 
 // NewEqualizer returns a beep.Streamer that modifies the stream based on the EqualizerSection slice that is passed in.
 // The SampleRate (sr) must match that of the Streamer.
-func NewEqualizer(st beep.Streamer, sr beep.SampleRate, s EqualizerSections) beep.Streamer {
-	return &equalizer{
+func NewEqualizer[S beep.Size, P beep.Point[S]](st beep.Streamer[S, P], sr beep.SampleRate, s EqualizerSections[S, P]) beep.Streamer[S, P] {
+	return &equalizer[S, P]{
 		streamer: st,
 		sections: s.sections(float64(sr)),
 	}
 }
 
-func (m MonoEqualizerSections) sections(fs float64) []section {
-	out := make([]section, len(m))
+func (m MonoEqualizerSections[S, P]) sections(fs S) []section[S, P] {
+	out := make([]section[S, P], len(m))
 	for i, s := range m {
 		out[i] = s.section(fs)
 	}
 	return out
 }
 
-func (m StereoEqualizerSections) sections(fs float64) []section {
-	out := make([]section, len(m))
+func (m StereoEqualizerSections[S, P]) sections(fs S) []section[S, P] {
+	out := make([]section[S, P], len(m))
 	for i, s := range m {
 		out[i] = s.section(fs)
 	}
@@ -96,7 +96,7 @@ func (m StereoEqualizerSections) sections(fs float64) []section {
 }
 
 // Stream streams the wrapped Streamer modified by Equalizer.
-func (e *equalizer) Stream(samples [][2]float64) (n int, ok bool) {
+func (e *equalizer[S, P]) Stream(samples []P) (n int, ok bool) {
 	n, ok = e.streamer.Stream(samples)
 	for _, s := range e.sections {
 		s.apply(samples)
@@ -105,62 +105,62 @@ func (e *equalizer) Stream(samples [][2]float64) (n int, ok bool) {
 }
 
 // Err propagates the wrapped Streamer's errors.
-func (e *equalizer) Err() error {
+func (e *equalizer[S, P]) Err() error {
 	return e.streamer.Err()
 }
 
-func (m MonoEqualizerSection) section(fs float64) section {
-	beta := math.Tan(m.Bf/2.0*math.Pi/(fs/2.0)) *
+func (m MonoEqualizerSection[S, P]) section(fs S) section[S, P] {
+	beta := math.Tan(m.Bf/2.0*math.Pi/(float64(fs)/2.0)) *
 		math.Sqrt(math.Abs(math.Pow(math.Pow(10, m.GB/20.0), 2.0)-
 			math.Pow(math.Pow(10.0, m.G0/20.0), 2.0))) /
 		math.Sqrt(math.Abs(math.Pow(math.Pow(10.0, m.G/20.0), 2.0)-
 			math.Pow(math.Pow(10.0, m.GB/20.0), 2.0)))
 
-	b := []float64{
-		(math.Pow(10.0, m.G0/20.0) + math.Pow(10.0, m.G/20.0)*beta) / (1 + beta),
-		(-2 * math.Pow(10.0, m.G0/20.0) * math.Cos(m.F0*math.Pi/(fs/2.0))) / (1 + beta),
-		(math.Pow(10.0, m.G0/20) - math.Pow(10.0, m.G/20.0)*beta) / (1 + beta),
+	b := []S{
+		S((math.Pow(10.0, m.G0/20.0) + math.Pow(10.0, m.G/20.0)*beta) / (1 + beta)),
+		S((-2 * math.Pow(10.0, m.G0/20.0) * math.Cos(m.F0*math.Pi/(float64(fs)/2.0))) / (1 + beta)),
+		S((math.Pow(10.0, m.G0/20) - math.Pow(10.0, m.G/20.0)*beta) / (1 + beta)),
 	}
 
-	a := []float64{
+	a := []S{
 		1.0,
-		-2 * math.Cos(m.F0*math.Pi/(fs/2.0)) / (1 + beta),
-		(1 - beta) / (1 + beta),
+		S(-2 * math.Cos(m.F0*math.Pi/(float64(fs)/2.0)) / (1 + beta)),
+		S((1 - beta) / (1 + beta)),
 	}
 
-	return section{
-		a: [2][]float64{a, a},
-		b: [2][]float64{b, b},
+	return section[S, P]{
+		a: [2][]S{a, a},
+		b: [2][]S{b, b},
 	}
 }
 
-func (s StereoEqualizerSection) section(fs float64) section {
+func (s StereoEqualizerSection[S, P]) section(fs S) section[S, P] {
 	l := s.Left.section(fs)
 	r := s.Right.section(fs)
 
-	return section{
-		a: [2][]float64{l.a[0], r.a[0]},
-		b: [2][]float64{l.b[0], r.b[0]},
+	return section[S, P]{
+		a: [2][]S{l.a[0], r.a[0]},
+		b: [2][]S{l.b[0], r.b[0]},
 	}
 }
 
-func (s *section) apply(x [][2]float64) {
+func (s *section[S, P]) apply(x []P) {
 	ord := len(s.a[0]) - 1
 	np := len(x) - 1
 
 	if np < ord {
-		x = append(x, make([][2]float64, ord-np)...)
+		x = append(x, make([]P, ord-np)...)
 		np = ord
 	}
 
-	y := make([][2]float64, len(x))
+	y := make([]P, len(x))
 
 	if len(s.xPast) < len(x) {
-		s.xPast = append(s.xPast, make([][2]float64, len(x)-len(s.xPast))...)
+		s.xPast = append(s.xPast, make([]P, len(x)-len(s.xPast))...)
 	}
 
 	if len(s.yPast) < len(x) {
-		s.yPast = append(s.yPast, make([][2]float64, len(x)-len(s.yPast))...)
+		s.yPast = append(s.yPast, make([]P, len(x)-len(s.yPast))...)
 	}
 
 	for i := 0; i < len(x); i++ {

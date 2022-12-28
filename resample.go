@@ -10,9 +10,9 @@ import "fmt"
 // Streamer which stream at a different sample rate will lead to a changed speed and pitch of the
 // playback.
 //
-//   sr := beep.SampleRate(48000)
-//   speaker.Init(sr, sr.N(time.Second/2))
-//   speaker.Play(beep.Resample(3, format.SampleRate, sr, s))
+//	sr := beep.SampleRate(48000)
+//	speaker.Init(sr, sr.N(time.Second/2))
+//	speaker.Play(beep.Resample(3, format.SampleRate, sr, s))
 //
 // In the example, the original sample rate of the source if format.SampleRate. We want to play it
 // at the speaker's native sample rate and thus we need to resample.
@@ -21,36 +21,36 @@ import "fmt"
 // worse performance. Values below 1 or above 64 are invalid and Resample will panic. Here's a table
 // for deciding which quality to pick.
 //
-//   quality | use case
-//   --------|---------
-//   1       | very high performance, on-the-fly resampling, low quality
-//   3-4     | good performance, on-the-fly resampling, good quality
-//   6       | higher CPU usage, usually not suitable for on-the-fly resampling, very good quality
-//   >6      | even higher CPU usage, for offline resampling, very good quality
+//	quality | use case
+//	--------|---------
+//	1       | very high performance, on-the-fly resampling, low quality
+//	3-4     | good performance, on-the-fly resampling, good quality
+//	6       | higher CPU usage, usually not suitable for on-the-fly resampling, very good quality
+//	>6      | even higher CPU usage, for offline resampling, very good quality
 //
 // Sane quality values are usually below 16. Higher values will consume too much CPU, giving
 // negligible quality improvements.
 //
 // Resample propagates errors from s.
-func Resample(quality int, old, new SampleRate, s Streamer) *Resampler {
-	return ResampleRatio(quality, float64(old)/float64(new), s)
+func Resample[S Size, P Point[S]](quality int, old, new SampleRate, s Streamer[S, P]) *Resampler[S, P] {
+	return ResampleRatio[S, P](quality, float64(old)/float64(new), s)
 }
 
 // ResampleRatio is same as Resample, except it takes the ratio of the old and the new sample rate,
 // specifically, the old sample rate divided by the new sample rate. Aside from correcting the
 // sample rate, this can be used to change the speed of the audio. For example, resampling at the
 // ratio of 2 and playing at the original sample rate will cause doubled speed in playback.
-func ResampleRatio(quality int, ratio float64, s Streamer) *Resampler {
+func ResampleRatio[S Size, P Point[S]](quality int, ratio float64, s Streamer[S, P]) *Resampler[S, P] {
 	if quality < 1 || 64 < quality {
 		panic(fmt.Errorf("resample: invalid quality: %d", quality))
 	}
-	return &Resampler{
+	return &Resampler[S, P]{
 		s:     s,
 		ratio: ratio,
 		first: true,
-		buf1:  make([][2]float64, 512),
-		buf2:  make([][2]float64, 512),
-		pts:   make([]point, quality*2),
+		buf1:  make([]P, 512),
+		buf2:  make([]P, 512),
+		pts:   make([]point[S], quality*2),
 		off:   0,
 		pos:   0,
 	}
@@ -59,18 +59,18 @@ func ResampleRatio(quality int, ratio float64, s Streamer) *Resampler {
 // Resampler is a Streamer created by Resample and ResampleRatio functions. It allows dynamic
 // changing of the resampling ratio, which can be useful for dynamically changing the speed of
 // streaming.
-type Resampler struct {
-	s          Streamer     // the orignal streamer
-	ratio      float64      // old sample rate / new sample rate
-	first      bool         // true when Stream was not called before
-	buf1, buf2 [][2]float64 // buf1 contains previous buf2, new data goes into buf2, buf1 is because interpolation might require old samples
-	pts        []point      // pts is for points used for interpolation
-	off        int          // off is the position of the start of buf2 in the original data
-	pos        int          // pos is the current position in the resampled data
+type Resampler[S Size, P Point[S]] struct {
+	s          Streamer[S, P] // the orignal streamer
+	ratio      float64        // old sample rate / new sample rate
+	first      bool           // true when Stream was not called before
+	buf1, buf2 []P            // buf1 contains previous buf2, new data goes into buf2, buf1 is because interpolation might require old samples
+	pts        []point[S]     // pts is for points used for interpolation
+	off        int            // off is the position of the start of buf2 in the original data
+	pos        int            // pos is the current position in the resampled data
 }
 
 // Stream streams the original audio resampled according to the current ratio.
-func (r *Resampler) Stream(samples [][2]float64) (n int, ok bool) {
+func (r *Resampler[S, P]) Stream(samples []P) (n int, ok bool) {
 	// if it's the first time, we need to fill buf2 with initial data, buf1 remains zeroed
 	if r.first {
 		sn, _ := r.s.Stream(r.buf2)
@@ -89,7 +89,7 @@ func (r *Resampler) Stream(samples [][2]float64) (n int, ok bool) {
 				// calculate the index of one of the closest samples
 				k := int(j) + pi - len(r.pts)/2 + 1
 
-				var y float64
+				var y S
 				switch {
 				// the sample is in buf1
 				case k < r.off:
@@ -122,12 +122,12 @@ func (r *Resampler) Stream(samples [][2]float64) (n int, ok bool) {
 					goto again
 				}
 
-				r.pts[pi] = point{float64(k), y}
+				r.pts[pi] = point[S]{S(k), y}
 			}
 
 			// calculate the resampled sample using polynomial interpolation from the
 			// quality*2 closest samples
-			samples[0][c] = lagrange(r.pts, j)
+			samples[0][c] = lagrange[S](r.pts, S(j))
 		}
 		samples = samples[1:]
 		n++
@@ -137,27 +137,26 @@ func (r *Resampler) Stream(samples [][2]float64) (n int, ok bool) {
 }
 
 // Err propagates the original Streamer's errors.
-func (r *Resampler) Err() error {
+func (r *Resampler[S, P]) Err() error {
 	return r.s.Err()
 }
 
 // Ratio returns the current resampling ratio.
-func (r *Resampler) Ratio() float64 {
+func (r *Resampler[S, P]) Ratio() float64 {
 	return r.ratio
 }
 
 // SetRatio sets the resampling ratio. This does not cause any glitches in the stream.
-func (r *Resampler) SetRatio(ratio float64) {
+func (r *Resampler[S, P]) SetRatio(ratio float64) {
 	r.pos = int(float64(r.pos) * r.ratio / ratio)
 	r.ratio = ratio
 }
 
 // lagrange calculates the value at x of a polynomial of order len(pts)+1 which goes through all
 // points in pts
-func lagrange(pts []point, x float64) (y float64) {
-	y = 0.0
+func lagrange[S Size](pts []point[S], x S) (y S) {
 	for j := range pts {
-		l := 1.0
+		var l S = 1.0
 		for m := range pts {
 			if j == m {
 				continue
@@ -169,6 +168,6 @@ func lagrange(pts []point, x float64) (y float64) {
 	return y
 }
 
-type point struct {
-	X, Y float64
+type point[S Size] struct {
+	X, Y S
 }

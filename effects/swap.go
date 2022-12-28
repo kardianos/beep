@@ -5,15 +5,15 @@ import "github.com/faiface/beep"
 // Swap swaps the left and right channel of the wrapped Streamer.
 //
 // The returned Streamer propagates s's errors through Err.
-func Swap(s beep.Streamer) beep.Streamer {
-	return &swap{s}
+func Swap[S beep.Size, P beep.Point[S]](s beep.Streamer[S, P]) beep.Streamer[S, P] {
+	return &swap[S, P]{s}
 }
 
-type swap struct {
-	Streamer beep.Streamer
+type swap[S beep.Size, P beep.Point[S]] struct {
+	Streamer beep.Streamer[S, P]
 }
 
-func (s *swap) Stream(samples [][2]float64) (n int, ok bool) {
+func (s *swap[S, P]) Stream(samples []P) (n int, ok bool) {
 	n, ok = s.Streamer.Stream(samples)
 	for i := range samples[:n] {
 		samples[i][0], samples[i][1] = samples[i][1], samples[i][0]
@@ -21,6 +21,6 @@ func (s *swap) Stream(samples [][2]float64) (n int, ok bool) {
 	return n, ok
 }
 
-func (s *swap) Err() error {
+func (s *swap[S, P]) Err() error {
 	return s.Streamer.Err()
 }

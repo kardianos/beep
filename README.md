@@ -1,3 +1,9 @@
+# Fork
+
+This is a fork of `Beep` that attempts to make a generic internal handling of audio, rather then fixed float64.
+
+I'm unsure if this is wise.
+
 # Beep [![GoDoc](https://godoc.org/github.com/faiface/beep?status.svg)](https://godoc.org/github.com/faiface/beep) [![Go Report Card](https://goreportcard.com/badge/github.com/faiface/beep)](https://goreportcard.com/report/github.com/faiface/beep) [![Discord Chat](https://img.shields.io/discord/699679031603494954)](https://discord.gg/q2DK4MP)
 
 A little package that brings sound to any Go application. Suitable for playback and audio-processing.

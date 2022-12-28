@@ -16,8 +16,8 @@ import (
 //
 // Do not close the supplied Reader, instead, use the Close method of the returned
 // StreamSeekCloser when you want to release the resources.
-func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error) {
-	d := decoder{r: r}
+func Decode[S beep.Size, P beep.Point[S]](r io.Reader) (s beep.StreamSeekCloser[S, P], format beep.Format[S, P], err error) {
+	d := decoder[S, P]{r: r}
 	defer func() { // hacky way to always close r if an error occurred
 		if closer, ok := d.r.(io.Closer); ok {
 			if err != nil {
@@ -28,21 +28,21 @@ func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error
 
 	// READ "RIFF" header
 	if err := binary.Read(r, binary.LittleEndian, d.h.RiffMark[:]); err != nil {
-		return nil, beep.Format{}, errors.Wrap(err, "wav")
+		return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav")
 	}
 	if string(d.h.RiffMark[:]) != "RIFF" {
-		return nil, beep.Format{}, fmt.Errorf("wav: missing RIFF at the beginning > %s", string(d.h.RiffMark[:]))
+		return nil, beep.Format[S, P]{}, fmt.Errorf("wav: missing RIFF at the beginning > %s", string(d.h.RiffMark[:]))
 	}
 
 	// READ Total file size
 	if err := binary.Read(r, binary.LittleEndian, &d.h.FileSize); err != nil {
-		return nil, beep.Format{}, errors.Wrap(err, "wav: missing RIFF file size")
+		return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing RIFF file size")
 	}
 	if err := binary.Read(r, binary.LittleEndian, d.h.WaveMark[:]); err != nil {
-		return nil, beep.Format{}, errors.Wrap(err, "wav: missing RIFF file type")
+		return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing RIFF file type")
 	}
 	if string(d.h.WaveMark[:]) != "WAVE" {
-		return nil, beep.Format{}, errors.New("wav: unsupported file type")
+		return nil, beep.Format[S, P]{}, errors.New("wav: unsupported file type")
 	}
 
 	// check each formtypes
@@ -51,17 +51,17 @@ func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error
 	d.hsz = 4 + 4 + 4 // add size of (RiffMark + FileSize + WaveMark)
 	for string(ft[:]) != "data" {
 		if err = binary.Read(r, binary.LittleEndian, ft[:]); err != nil {
-			return nil, beep.Format{}, errors.Wrap(err, "wav: missing chunk type")
+			return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing chunk type")
 		}
 		switch {
 		case string(ft[:]) == "fmt ":
 			d.h.FmtMark = ft
 			if err := binary.Read(r, binary.LittleEndian, &d.h.FormatSize); err != nil {
-				return nil, beep.Format{}, errors.New("wav: missing format chunk size")
+				return nil, beep.Format[S, P]{}, errors.New("wav: missing format chunk size")
 			}
 			d.hsz += 4 + 4 + d.h.FormatSize // add size of (FmtMark + FormatSize + its trailing size)
 			if err := binary.Read(r, binary.LittleEndian, &d.h.FormatType); err != nil {
-				return nil, beep.Format{}, errors.New("wav: missing format type")
+				return nil, beep.Format[S, P]{}, errors.New("wav: missing format type")
 			}
 			if d.h.FormatType == -2 {
 				// WAVEFORMATEXTENSIBLE
@@ -70,7 +70,7 @@ func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error
 					guid{0, 0, 0, [8]byte{0, 0, 0, 0, 0, 0, 0, 0}},
 				}
 				if err := binary.Read(r, binary.LittleEndian, &fmtchunk); err != nil {
-					return nil, beep.Format{}, errors.New("wav: missing format chunk body")
+					return nil, beep.Format[S, P]{}, errors.New("wav: missing format chunk body")
 				}
 				d.h.NumChans = fmtchunk.NumChans
 				d.h.SampleRate = fmtchunk.SampleRate
@@ -85,7 +85,7 @@ func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error
 					[8]byte{0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71},
 				}
 				if fmtchunk.SubFormat != pcmguid {
-					return nil, beep.Format{}, fmt.Errorf(
+					return nil, beep.Format[S, P]{}, fmt.Errorf(
 						"wav: unsupported sub format type - %08x-%04x-%04x-%s",
 						fmtchunk.SubFormat.Data1, fmtchunk.SubFormat.Data2, fmtchunk.SubFormat.Data3,
 						hex.EncodeToString(fmtchunk.SubFormat.Data4[:]),
@@ -95,7 +95,7 @@ func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error
 				// WAVEFORMAT or WAVEFORMATEX
 				fmtchunk := formatchunk{0, 0, 0, 0, 0}
 				if err := binary.Read(r, binary.LittleEndian, &fmtchunk); err != nil {
-					return nil, beep.Format{}, errors.New("wav: missing format chunk body")
+					return nil, beep.Format[S, P]{}, errors.New("wav: missing format chunk body")
 				}
 				d.h.NumChans = fmtchunk.NumChans
 				d.h.SampleRate = fmtchunk.SampleRate
@@ -107,47 +107,47 @@ func Decode(r io.Reader) (s beep.StreamSeekCloser, format beep.Format, err error
 				if d.h.FormatSize > 16 {
 					trash := make([]byte, d.h.FormatSize-16)
 					if err := binary.Read(r, binary.LittleEndian, trash); err != nil {
-						return nil, beep.Format{}, errors.Wrap(err, "wav: missing extended format chunk body")
+						return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing extended format chunk body")
 					}
 				}
 			}
 		case string(ft[:]) == "data":
 			d.h.DataMark = ft
 			if err := binary.Read(r, binary.LittleEndian, &d.h.DataSize); err != nil {
-				return nil, beep.Format{}, errors.Wrap(err, "wav: missing data chunk size")
+				return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing data chunk size")
 			}
 			d.hsz += 4 + 4 //add size of (DataMark + DataSize)
 		default:
 			if err := binary.Read(r, binary.LittleEndian, &fs); err != nil {
-				return nil, beep.Format{}, errors.Wrap(err, "wav: missing unknown chunk size")
+				return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing unknown chunk size")
 			}
-			if fs % 2 != 0 {
+			if fs%2 != 0 {
 				fs = fs + 1
 			}
 			trash := make([]byte, fs)
 			if err := binary.Read(r, binary.LittleEndian, trash); err != nil {
-				return nil, beep.Format{}, errors.Wrap(err, "wav: missing unknown chunk body")
+				return nil, beep.Format[S, P]{}, errors.Wrap(err, "wav: missing unknown chunk body")
 			}
 			d.hsz += 4 + fs //add size of (Unknown formtype + formsize)
 		}
 	}
 
 	if string(d.h.FmtMark[:]) != "fmt " {
-		return nil, beep.Format{}, errors.New("wav: missing format chunk marker")
+		return nil, beep.Format[S, P]{}, errors.New("wav: missing format chunk marker")
 	}
 	if string(d.h.DataMark[:]) != "data" {
-		return nil, beep.Format{}, errors.New("wav: missing data chunk marker")
+		return nil, beep.Format[S, P]{}, errors.New("wav: missing data chunk marker")
 	}
 	if d.h.FormatType != 1 && d.h.FormatType != -2 {
-		return nil, beep.Format{}, fmt.Errorf("wav: unsupported format type - %d", d.h.FormatType)
+		return nil, beep.Format[S, P]{}, fmt.Errorf("wav: unsupported format type - %d", d.h.FormatType)
 	}
 	if d.h.NumChans <= 0 {
-		return nil, beep.Format{}, errors.New("wav: invalid number of channels (less than 1)")
+		return nil, beep.Format[S, P]{}, errors.New("wav: invalid number of channels (less than 1)")
 	}
 	if d.h.BitsPerSample != 8 && d.h.BitsPerSample != 16 && d.h.BitsPerSample != 24 {
-		return nil, beep.Format{}, errors.New("wav: unsupported number of bits per sample, 8 or 16 or 24 are supported")
+		return nil, beep.Format[S, P]{}, errors.New("wav: unsupported number of bits per sample, 8 or 16 or 24 are supported")
 	}
-	format = beep.Format{
+	format = beep.Format[S, P]{
 		SampleRate:  beep.SampleRate(d.h.SampleRate),
 		NumChannels: int(d.h.NumChans),
 		Precision:   int(d.h.BitsPerSample / 8),
@@ -194,7 +194,7 @@ type header struct {
 	DataSize      int32
 }
 
-type decoder struct {
+type decoder[S beep.Size, P beep.Point[S]] struct {
 	r   io.Reader
 	h   header
 	hsz int32
@@ -202,7 +202,7 @@ type decoder struct {
 	err error
 }
 
-func (d *decoder) Stream(samples [][2]float64) (n int, ok bool) {
+func (d *decoder[S, P]) Stream(samples []P) (n int, ok bool) {
 	if d.err != nil || d.pos >= d.h.DataSize {
 		return 0, false
 	}
@@ -219,57 +219,57 @@ func (d *decoder) Stream(samples [][2]float64) (n int, ok bool) {
 	switch {
 	case d.h.BitsPerSample == 8 && d.h.NumChans == 1:
 		for i, j := 0, 0; i <= n-bytesPerFrame; i, j = i+bytesPerFrame, j+1 {
-			val := float64(p[i])/(1<<8-1)*2 - 1
+			val := S(p[i])/(1<<8-1)*2 - 1
 			samples[j][0] = val
 			samples[j][1] = val
 		}
 	case d.h.BitsPerSample == 8 && d.h.NumChans >= 2:
 		for i, j := 0, 0; i <= n-bytesPerFrame; i, j = i+bytesPerFrame, j+1 {
-			samples[j][0] = float64(p[i+0])/(1<<8-1)*2 - 1
-			samples[j][1] = float64(p[i+1])/(1<<8-1)*2 - 1
+			samples[j][0] = S(p[i+0])/(1<<8-1)*2 - 1
+			samples[j][1] = S(p[i+1])/(1<<8-1)*2 - 1
 		}
 	case d.h.BitsPerSample == 16 && d.h.NumChans == 1:
 		for i, j := 0, 0; i <= n-bytesPerFrame; i, j = i+bytesPerFrame, j+1 {
-			val := float64(int16(p[i+0])+int16(p[i+1])*(1<<8)) / (1<<16 - 1)
+			val := S(int16(p[i+0])+int16(p[i+1])*(1<<8)) / (1<<16 - 1)
 			samples[j][0] = val
 			samples[j][1] = val
 		}
 	case d.h.BitsPerSample == 16 && d.h.NumChans >= 2:
 		for i, j := 0, 0; i <= n-bytesPerFrame; i, j = i+bytesPerFrame, j+1 {
-			samples[j][0] = float64(int16(p[i+0])+int16(p[i+1])*(1<<8)) / (1<<16 - 1)
-			samples[j][1] = float64(int16(p[i+2])+int16(p[i+3])*(1<<8)) / (1<<16 - 1)
+			samples[j][0] = S(int16(p[i+0])+int16(p[i+1])*(1<<8)) / (1<<16 - 1)
+			samples[j][1] = S(int16(p[i+2])+int16(p[i+3])*(1<<8)) / (1<<16 - 1)
 		}
 	case d.h.BitsPerSample == 24 && d.h.NumChans == 1:
 		for i, j := 0, 0; i <= n-bytesPerFrame; i, j = i+bytesPerFrame, j+1 {
-			val := float64((int32(p[i+0])<<8)+(int32(p[i+1])<<16)+(int32(p[i+2])<<24)) / (1 << 8) / (1<<24 - 1)
+			val := S((int32(p[i+0])<<8)+(int32(p[i+1])<<16)+(int32(p[i+2])<<24)) / (1 << 8) / (1<<24 - 1)
 			samples[j][0] = val
 			samples[j][1] = val
 		}
 	case d.h.BitsPerSample == 24 && d.h.NumChans >= 2:
 		for i, j := 0, 0; i <= n-bytesPerFrame; i, j = i+bytesPerFrame, j+1 {
-			samples[j][0] = float64((int32(p[i+0])<<8)+(int32(p[i+1])<<16)+(int32(p[i+2])<<24)) / (1 << 8) / (1<<24 - 1)
-			samples[j][1] = float64((int32(p[i+3])<<8)+(int32(p[i+4])<<16)+(int32(p[i+5])<<24)) / (1 << 8) / (1<<24 - 1)
+			samples[j][0] = S((int32(p[i+0])<<8)+(int32(p[i+1])<<16)+(int32(p[i+2])<<24)) / (1 << 8) / (1<<24 - 1)
+			samples[j][1] = S((int32(p[i+3])<<8)+(int32(p[i+4])<<16)+(int32(p[i+5])<<24)) / (1 << 8) / (1<<24 - 1)
 		}
 	}
 	d.pos += int32(n)
 	return n / bytesPerFrame, true
 }
 
-func (d *decoder) Err() error {
+func (d *decoder[S, P]) Err() error {
 	return d.err
 }
 
-func (d *decoder) Len() int {
+func (d *decoder[S, P]) Len() int {
 	numBytes := time.Duration(d.h.DataSize)
 	perFrame := time.Duration(d.h.BytesPerFrame)
 	return int(numBytes / perFrame)
 }
 
-func (d *decoder) Position() int {
+func (d *decoder[S, P]) Position() int {
 	return int(d.pos / int32(d.h.BytesPerFrame))
 }
 
-func (d *decoder) Seek(p int) error {
+func (d *decoder[S, P]) Seek(p int) error {
 	seeker, ok := d.r.(io.Seeker)
 	if !ok {
 		panic(fmt.Errorf("wav: seek: resource is not io.Seeker"))
@@ -286,7 +286,7 @@ func (d *decoder) Seek(p int) error {
 	return nil
 }
 
-func (d *decoder) Close() error {
+func (d *decoder[S, P]) Close() error {
 	if closer, ok := d.r.(io.Closer); ok {
 		err := closer.Close()
 		if err != nil {

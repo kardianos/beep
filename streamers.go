@@ -2,8 +2,8 @@ package beep
 
 // Silence returns a Streamer which streams num samples of silence. If num is negative, silence is
 // streamed forever.
-func Silence(num int) Streamer {
-	return StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+func Silence[S Size, P Point[S]](num int) Streamer[S, P] {
+	return StreamerFunc[S, P](func(samples []P) (n int, ok bool) {
 		if num == 0 {
 			return 0, false
 		}
@@ -11,7 +11,8 @@ func Silence(num int) Streamer {
 			samples = samples[:num]
 		}
 		for i := range samples {
-			samples[i] = [2]float64{}
+			var p P
+			samples[i] = p
 		}
 		if num > 0 {
 			num -= len(samples)
@@ -22,8 +23,8 @@ func Silence(num int) Streamer {
 
 // Callback returns a Streamer, which does not stream any samples, but instead calls f the first
 // time its Stream method is called. The speaker is locked while f is called.
-func Callback(f func()) Streamer {
-	return StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+func Callback[S Size, P Point[S]](f func()) Streamer[S, P] {
+	return StreamerFunc[S, P](func(samples []P) (n int, ok bool) {
 		if f != nil {
 			f()
 			f = nil
@@ -36,12 +37,12 @@ func Callback(f func()) Streamer {
 // function. The streaming stops when g returns nil.
 //
 // Iterate does not propagate errors from the generated Streamers.
-func Iterate(g func() Streamer) Streamer {
+func Iterate[S Size, P Point[S]](g func() Streamer[S, P]) Streamer[S, P] {
 	var (
-		s     Streamer
+		s     Streamer[S, P]
 		first = true
 	)
-	return StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+	return StreamerFunc[S, P](func(samples []P) (n int, ok bool) {
 		if first {
 			s = g()
 			first = false

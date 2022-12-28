@@ -17,19 +17,23 @@ func main() {
 		log.Fatal(err)
 	}
 
-	streamer, format, err := mp3.Decode(f)
+	streamer, format, err := mp3.Decode[float64, [2]float64](f)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer streamer.Close()
 
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+	player, err := speaker.New[float64, [2]float64](format.SampleRate, format.SampleRate.N(time.Second/10))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer player.Close()
 
-	loop := beep.Loop(3, streamer)
+	loop := beep.Loop[float64, [2]float64](3, streamer)
 	fast := beep.ResampleRatio(4, 5, loop)
 
 	done := make(chan bool)
-	speaker.Play(beep.Seq(fast, beep.Callback(func() {
+	player.Play(beep.Seq[float64, [2]float64](fast, beep.Callback[float64, [2]float64](func() {
 		done <- true
 	})))
 
@@ -38,9 +42,9 @@ func main() {
 		case <-done:
 			return
 		case <-time.After(time.Second):
-			speaker.Lock()
+			player.Lock()
 			fmt.Println(format.SampleRate.D(streamer.Position()).Round(time.Second))
-			speaker.Unlock()
+			player.Unlock()
 		}
 	}
 }

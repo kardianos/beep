@@ -14,8 +14,8 @@ import (
 	"github.com/gdamore/tcell"
 )
 
-func multiplyChannels(left, right float64, s beep.Streamer) beep.Streamer {
-	return beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+func multiplyChannels[S beep.Size, P beep.Point[S]](left, right S, s beep.Streamer[S, P]) beep.Streamer[S, P] {
+	return beep.StreamerFunc[S, P](func(samples []P) (n int, ok bool) {
 		n, ok = s.Stream(samples)
 		for i := range samples[:n] {
 			samples[i][0] *= left
@@ -25,15 +25,15 @@ func multiplyChannels(left, right float64, s beep.Streamer) beep.Streamer {
 	})
 }
 
-type movingStreamer struct {
+type movingStreamer[S beep.Size, P beep.Point[S]] struct {
 	x, y         float64
 	velX, velY   float64
-	leftDoppler  beep.Streamer
-	rightDoppler beep.Streamer
+	leftDoppler  beep.Streamer[S, P]
+	rightDoppler beep.Streamer[S, P]
 }
 
-func newMovingStreamer(sr beep.SampleRate, x, y float64, streamer beep.Streamer) *movingStreamer {
-	ms := &movingStreamer{x: x, y: y}
+func newMovingStreamer[S beep.Size, P beep.Point[S]](sr beep.SampleRate, x, y float64, streamer beep.Streamer[S, P]) *movingStreamer[S, P] {
+	ms := &movingStreamer[S, P]{x: x, y: y}
 
 	const metersPerSecond = 343
 	samplesPerSecond := float64(sr)
@@ -57,8 +57,8 @@ func newMovingStreamer(sr beep.SampleRate, x, y float64, streamer beep.Streamer)
 	return ms
 }
 
-func (ms *movingStreamer) play() {
-	speaker.Play(ms.leftDoppler, ms.rightDoppler)
+func (ms *movingStreamer[S, P]) play(s *speaker.Player[S, P]) {
+	s.Play(ms.leftDoppler, ms.rightDoppler)
 }
 
 func drawCircle(screen tcell.Screen, x, y float64, style tcell.Style) {
@@ -128,16 +128,16 @@ var directions = map[rune]EventMappedLocation{
 	'2': {-1, 1, 1, 1, SetPoint},
 	// Left, Right
 	'4': {-1.5, 0, -1, 0, SetPoint},
-	'6': { 1,0,  1.5,0, SetPoint},
+	'6': {1, 0, 1.5, 0, SetPoint},
 	// Layout Top Left, Top Right, Bottom Right, Bottom Left
-	'7': {-1.8, -1.8,-0.8, -1.8, SetPoint},
-	'9': {0.8, -1.8,1.8, -1.8,  SetPoint},
+	'7': {-1.8, -1.8, -0.8, -1.8, SetPoint},
+	'9': {0.8, -1.8, 1.8, -1.8, SetPoint},
 	'1': {-1.8, 1.8, -0.8, 1.8, SetPoint},
 	'3': {0.8, 1.8, 1.8, 1.8, SetPoint},
 
 	// Diagonal Locations
 	'\\': {-1, -1, 1, 1, SetPoint},
-	'/': {-1, 1, 1, -1, SetPoint},
+	'/':  {-1, 1, 1, -1, SetPoint},
 
 	// Left
 	'a': {-1, 0, 0, 0, Applied},
@@ -161,15 +161,19 @@ func main() {
 	if err != nil {
 		report(err)
 	}
-	streamer, format, err := mp3.Decode(f)
+	streamer, format, err := mp3.Decode[float64, [2]float64](f)
 	if err != nil {
 		report(err)
 	}
 	defer streamer.Close()
 
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
+	play, err := speaker.New[float64, [2]float64](format.SampleRate, format.SampleRate.N(time.Second/30))
+	if err != nil {
+		report(err)
+	}
+	defer play.Close()
 
-	leftCh, rightCh := beep.Dup(streamer)
+	leftCh, rightCh := beep.Dup[float64, [2]float64](streamer)
 
 	leftCh = effects.Mono(multiplyChannels(1, 0, leftCh))
 	rightCh = effects.Mono(multiplyChannels(0, 1, rightCh))
@@ -177,8 +181,8 @@ func main() {
 	leftMS := newMovingStreamer(format.SampleRate, -1, 0, leftCh)
 	rightMS := newMovingStreamer(format.SampleRate, +1, 0, rightCh)
 
-	leftMS.play()
-	rightMS.play()
+	leftMS.play(play)
+	rightMS.play(play)
 
 	screen, err := tcell.NewScreen()
 	if err != nil {
@@ -202,10 +206,10 @@ loop:
 	for {
 		select {
 		case <-frames:
-			speaker.Lock()
+			play.Lock()
 			lx, ly := leftMS.x, leftMS.y
 			rx, ry := rightMS.x, rightMS.y
-			speaker.Unlock()
+			play.Unlock()
 
 			style := tcell.StyleDefault.
 				Background(tcell.ColorWhiteSmoke).
@@ -235,7 +239,7 @@ loop:
 					fastSpeed = 16.0
 				)
 
-				speaker.Lock()
+				play.Lock()
 
 				speed := slowSpeed
 				if unicode.ToLower(event.Rune()) != event.Rune() {
@@ -285,7 +289,7 @@ loop:
 					rightMS.y = dir.ry
 				}
 
-				speaker.Unlock()
+				play.Unlock()
 			}
 		}
 	}

@@ -1,7 +1,16 @@
 package beep
 
+type Point[S Size] interface {
+	// [1]S | [2]S
+	[2]S
+}
+
+type Size interface {
+	float64 | float32
+}
+
 // Streamer is able to stream a finite or infinite sequence of audio samples.
-type Streamer interface {
+type Streamer[S Size, P Point[S]] interface {
 	// Stream copies at most len(samples) next audio samples to the samples slice.
 	//
 	// The sample rate of the samples is unspecified in general, but should be specified for
@@ -30,7 +39,7 @@ type Streamer interface {
 	//
 	// The Streamer is drained and no more samples will come. If Err returns a non-nil error, only
 	// this case is valid. Only this case may occur in the following calls.
-	Stream(samples [][2]float64) (n int, ok bool)
+	Stream(samples []P) (n int, ok bool)
 
 	// Err returns an error which occurred during streaming. If no error occurred, nil is
 	// returned.
@@ -45,8 +54,8 @@ type Streamer interface {
 }
 
 // StreamSeeker is a finite duration Streamer which supports seeking to an arbitrary position.
-type StreamSeeker interface {
-	Streamer
+type StreamSeeker[S Size, P Point[S]] interface {
+	Streamer[S, P]
 
 	// Duration returns the total number of samples of the Streamer.
 	Len() int
@@ -64,8 +73,8 @@ type StreamSeeker interface {
 
 // StreamCloser is a Streamer streaming from a resource which needs to be released, such as a file
 // or a network connection.
-type StreamCloser interface {
-	Streamer
+type StreamCloser[S Size, P Point[S]] interface {
+	Streamer[S, P]
 
 	// Close closes the Streamer and releases it's resources. Streamer will no longer stream any
 	// samples.
@@ -73,8 +82,8 @@ type StreamCloser interface {
 }
 
 // StreamSeekCloser is a union of StreamSeeker and StreamCloser.
-type StreamSeekCloser interface {
-	Streamer
+type StreamSeekCloser[S Size, P Point[S]] interface {
+	Streamer[S, P]
 	Len() int
 	Position() int
 	Seek(p int) error
@@ -86,21 +95,21 @@ type StreamSeekCloser interface {
 //
 // Example:
 //
-//   noise := StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
-//       for i := range samples {
-//           samples[i][0] = rand.Float64()*2 - 1
-//           samples[i][1] = rand.Float64()*2 - 1
-//       }
-//       return len(samples), true
-//   })
-type StreamerFunc func(samples [][2]float64) (n int, ok bool)
+//	noise := StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+//	    for i := range samples {
+//	        samples[i][0] = rand.Float64()*2 - 1
+//	        samples[i][1] = rand.Float64()*2 - 1
+//	    }
+//	    return len(samples), true
+//	})
+type StreamerFunc[S Size, P Point[S]] func(samples []P) (n int, ok bool)
 
 // Stream calls the wrapped streaming function.
-func (sf StreamerFunc) Stream(samples [][2]float64) (n int, ok bool) {
+func (sf StreamerFunc[S, P]) Stream(samples []P) (n int, ok bool) {
 	return sf(samples)
 }
 
 // Err always returns nil.
-func (sf StreamerFunc) Err() error {
+func (sf StreamerFunc[S, P]) Err() error {
 	return nil
 }

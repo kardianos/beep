@@ -17,12 +17,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	streamer, format, err := mp3.Decode(f)
+	streamer, format, err := mp3.Decode[float64, [2]float64](f)
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer streamer.Close()
 
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/60))
+	player, err := speaker.New[float64, [2]float64](format.SampleRate, format.SampleRate.N(time.Second/60))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer player.Close()
 
 	buffer := beep.NewBuffer(format)
 	buffer.Append(streamer)
@@ -33,6 +38,6 @@ func main() {
 		fmt.Scanln()
 
 		shot := buffer.Streamer(0, buffer.Len())
-		speaker.Play(shot)
+		player.Play(shot)
 	}
 }

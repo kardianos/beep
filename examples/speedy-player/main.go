@@ -20,26 +20,27 @@ func drawTextLine(screen tcell.Screen, x, y int, s string, style tcell.Style) {
 	}
 }
 
-type audioPanel struct {
+type audioPanel[S beep.Size, P beep.Point[S]] struct {
+	player     *speaker.Player[S, P]
 	sampleRate beep.SampleRate
-	streamer   beep.StreamSeeker
-	ctrl       *beep.Ctrl
-	resampler  *beep.Resampler
-	volume     *effects.Volume
+	streamer   beep.StreamSeeker[S, P]
+	ctrl       *beep.Ctrl[S, P]
+	resampler  *beep.Resampler[S, P]
+	volume     *effects.Volume[S, P]
 }
 
-func newAudioPanel(sampleRate beep.SampleRate, streamer beep.StreamSeeker) *audioPanel {
-	ctrl := &beep.Ctrl{Streamer: beep.Loop(-1, streamer)}
-	resampler := beep.ResampleRatio(4, 1, ctrl)
-	volume := &effects.Volume{Streamer: resampler, Base: 2}
-	return &audioPanel{sampleRate, streamer, ctrl, resampler, volume}
+func newAudioPanel[S beep.Size, P beep.Point[S]](player *speaker.Player[S, P], sampleRate beep.SampleRate, streamer beep.StreamSeeker[S, P]) *audioPanel[S, P] {
+	ctrl := &beep.Ctrl[S, P]{Streamer: beep.Loop(-1, streamer)}
+	resampler := beep.ResampleRatio[S, P](4, 1, ctrl)
+	volume := &effects.Volume[S, P]{Streamer: resampler, Base: 2}
+	return &audioPanel[S, P]{player, sampleRate, streamer, ctrl, resampler, volume}
 }
 
-func (ap *audioPanel) play() {
-	speaker.Play(ap.volume)
+func (ap *audioPanel[S, P]) play() {
+	ap.player.Play(ap.volume)
 }
 
-func (ap *audioPanel) draw(screen tcell.Screen) {
+func (ap *audioPanel[S, P]) draw(screen tcell.Screen) {
 	mainStyle := tcell.StyleDefault.
 		Background(tcell.NewHexColor(0x473437)).
 		Foreground(tcell.NewHexColor(0xD7D8A2))
@@ -54,12 +55,12 @@ func (ap *audioPanel) draw(screen tcell.Screen) {
 	drawTextLine(screen, 0, 2, "Press [SPACE] to pause/resume.", mainStyle)
 	drawTextLine(screen, 0, 3, "Use keys in (?/?) to turn the buttons.", mainStyle)
 
-	speaker.Lock()
+	ap.player.Lock()
 	position := ap.sampleRate.D(ap.streamer.Position())
 	length := ap.sampleRate.D(ap.streamer.Len())
 	volume := ap.volume.Volume
 	speed := ap.resampler.Ratio()
-	speaker.Unlock()
+	ap.player.Unlock()
 
 	positionStatus := fmt.Sprintf("%v / %v", position.Round(time.Second), length.Round(time.Second))
 	volumeStatus := fmt.Sprintf("%.1f", volume)
@@ -75,7 +76,7 @@ func (ap *audioPanel) draw(screen tcell.Screen) {
 	drawTextLine(screen, 16, 7, speedStatus, statusStyle)
 }
 
-func (ap *audioPanel) handle(event tcell.Event) (changed, quit bool) {
+func (ap *audioPanel[S, P]) handle(event tcell.Event) (changed, quit bool) {
 	switch event := event.(type) {
 	case *tcell.EventKey:
 		if event.Key() == tcell.KeyESC {
@@ -88,13 +89,13 @@ func (ap *audioPanel) handle(event tcell.Event) (changed, quit bool) {
 
 		switch unicode.ToLower(event.Rune()) {
 		case ' ':
-			speaker.Lock()
+			ap.player.Lock()
 			ap.ctrl.Paused = !ap.ctrl.Paused
-			speaker.Unlock()
+			ap.player.Unlock()
 			return false, false
 
 		case 'q', 'w':
-			speaker.Lock()
+			ap.player.Lock()
 			newPos := ap.streamer.Position()
 			if event.Rune() == 'q' {
 				newPos -= ap.sampleRate.N(time.Second)
@@ -111,31 +112,31 @@ func (ap *audioPanel) handle(event tcell.Event) (changed, quit bool) {
 			if err := ap.streamer.Seek(newPos); err != nil {
 				report(err)
 			}
-			speaker.Unlock()
+			ap.player.Unlock()
 			return true, false
 
 		case 'a':
-			speaker.Lock()
+			ap.player.Lock()
 			ap.volume.Volume -= 0.1
-			speaker.Unlock()
+			ap.player.Unlock()
 			return true, false
 
 		case 's':
-			speaker.Lock()
+			ap.player.Lock()
 			ap.volume.Volume += 0.1
-			speaker.Unlock()
+			ap.player.Unlock()
 			return true, false
 
 		case 'z':
-			speaker.Lock()
+			ap.player.Lock()
 			ap.resampler.SetRatio(ap.resampler.Ratio() * 15 / 16)
-			speaker.Unlock()
+			ap.player.Unlock()
 			return true, false
 
 		case 'x':
-			speaker.Lock()
+			ap.player.Lock()
 			ap.resampler.SetRatio(ap.resampler.Ratio() * 16 / 15)
-			speaker.Unlock()
+			ap.player.Unlock()
 			return true, false
 		}
 	}
@@ -151,13 +152,17 @@ func main() {
 	if err != nil {
 		report(err)
 	}
-	streamer, format, err := mp3.Decode(f)
+	streamer, format, err := mp3.Decode[float64, [2]float64](f)
 	if err != nil {
 		report(err)
 	}
 	defer streamer.Close()
 
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/30))
+	player, err := speaker.New[float64, [2]float64](format.SampleRate, format.SampleRate.N(time.Second/30))
+	if err != nil {
+		report(err)
+	}
+	defer player.Close()
 
 	screen, err := tcell.NewScreen()
 	if err != nil {
@@ -169,7 +174,7 @@ func main() {
 	}
 	defer screen.Fini()
 
-	ap := newAudioPanel(format.SampleRate, streamer)
+	ap := newAudioPanel[float64, [2]float64](player, format.SampleRate, streamer)
 
 	screen.Clear()
 	ap.draw(screen)

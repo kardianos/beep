@@ -25,6 +25,8 @@ func (m *Mixer[S, P]) Clear() {
 // len(samples), true. If there are no Streamers available, this methods streams silence.
 func (m *Mixer[S, P]) Stream(samples []P) (n int, ok bool) {
 	var tmp [512]P
+	var cP P
+	ct := cP.Count()
 
 	for len(samples) > 0 {
 		toStream := len(tmp)
@@ -42,8 +44,9 @@ func (m *Mixer[S, P]) Stream(samples []P) (n int, ok bool) {
 			// mix the stream
 			sn, sok := m.streamers[si].Stream(tmp[:toStream])
 			for i := range tmp[:sn] {
-				samples[i][0] += tmp[i][0]
-				samples[i][1] += tmp[i][1]
+				for j := 0; j < ct; j++ {
+					samples[i].Add(j, tmp[i].Get(j))
+				}
 			}
 			if !sok {
 				// remove drained streamer

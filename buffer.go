@@ -64,15 +64,22 @@ func (f Format[S, P]) encode(signed bool, p []byte, sample P) (n int) {
 	switch {
 	case f.NumChannels == 1:
 		var x S
-		x = sample[0]
-		x = norm[S]((sample[0] + sample[1]) / 2)
+		ct := sample.Count()
+		if ct == 1 {
+			x = sample.Get(0)
+		} else {
+			for _, v := range sample.Slice() {
+				x += v
+			}
+			x = norm(x / S(ct))
+		}
 		p = p[encodeFloat(signed, f.Precision, p, x):]
 	case f.NumChannels >= 2:
-		for c := range sample {
-			x := norm(sample[c])
+		for _, v := range sample.Slice() {
+			x := norm(v)
 			p = p[encodeFloat(signed, f.Precision, p, x):]
 		}
-		for c := len(sample); c < f.NumChannels; c++ {
+		for c := sample.Count(); c < f.NumChannels; c++ {
 			p = p[encodeFloat[S](signed, f.Precision, p, 0):]
 		}
 	default:
@@ -86,16 +93,18 @@ func (f Format[S, P]) decode(signed bool, p []byte) (sample P, n int) {
 	case f.NumChannels == 1:
 		x, _ := decodeFloat[S](signed, f.Precision, p)
 		var xx P
-		xx[0] = x
-		xx[1] = x
+		for i := range xx.Slice() {
+			xx = xx.Set(i, x).(P)
+		}
 		return xx, f.Width()
 	case f.NumChannels >= 2:
-		for c := range sample {
+		sl := sample.Slice()
+		for c := range sl {
 			x, n := decodeFloat[S](signed, f.Precision, p)
-			sample[c] = x
+			sample = sample.Set(c, x).(P)
 			p = p[n:]
 		}
-		for c := len(sample); c < f.NumChannels; c++ {
+		for c := sample.Count(); c < f.NumChannels; c++ {
 			_, n := decodeFloat[S](signed, f.Precision, p)
 			p = p[n:]
 		}

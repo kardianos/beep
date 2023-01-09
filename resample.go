@@ -80,7 +80,7 @@ func (r *Resampler[S, P]) Stream(samples []P) (n int, ok bool) {
 	// we start resampling, sample by sample
 	for len(samples) > 0 {
 	again:
-		for c := range samples[0] {
+		for c := range samples[0].Slice() {
 			// calculate the current position in the original data
 			j := float64(r.pos) * r.ratio
 
@@ -93,10 +93,10 @@ func (r *Resampler[S, P]) Stream(samples []P) (n int, ok bool) {
 				switch {
 				// the sample is in buf1
 				case k < r.off:
-					y = r.buf1[len(r.buf1)+k-r.off][c]
+					y = r.buf1[len(r.buf1)+k-r.off].Get(c)
 				// the sample is in buf2
 				case k < r.off+len(r.buf2):
-					y = r.buf2[k-r.off][c]
+					y = r.buf2[k-r.off].Get(c)
 				// the sample is beyond buf2, so we need to load new data
 				case k >= r.off+len(r.buf2):
 					// we load into buf1
@@ -127,7 +127,7 @@ func (r *Resampler[S, P]) Stream(samples []P) (n int, ok bool) {
 
 			// calculate the resampled sample using polynomial interpolation from the
 			// quality*2 closest samples
-			samples[0][c] = lagrange[S](r.pts, S(j))
+			samples[0] = samples[0].Set(c, lagrange[S](r.pts, S(j))).(P)
 		}
 		samples = samples[1:]
 		n++

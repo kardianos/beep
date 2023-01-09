@@ -10,21 +10,23 @@ import (
 
 // randomDataStreamer generates random samples of duration d and returns a StreamSeeker which streams
 // them and the data itself.
-func randomDataStreamer(numSamples int) (s beep.StreamSeeker, data [][2]float64) {
-	data = make([][2]float64, numSamples)
+func randomDataStreamer[S beep.Size, P beep.Point[S]](numSamples int) (s beep.StreamSeeker[S, P], data []P) {
+	data = make([]P, numSamples)
 	for i := range data {
-		data[i][0] = rand.Float64()*2 - 1
-		data[i][1] = rand.Float64()*2 - 1
+		d := data[i]
+		for c := range d.Slice() {
+			data[i] = d.Set(c, S(rand.Float64()*2-1)).(P)
+		}
 	}
-	return &dataStreamer{data, 0}, data
+	return &dataStreamer[S, P]{data, 0}, data
 }
 
-type dataStreamer struct {
-	data [][2]float64
+type dataStreamer[S beep.Size, P beep.Point[S]] struct {
+	data []P
 	pos  int
 }
 
-func (ds *dataStreamer) Stream(samples [][2]float64) (n int, ok bool) {
+func (ds *dataStreamer[S, P]) Stream(samples []P) (n int, ok bool) {
 	if ds.pos >= len(ds.data) {
 		return 0, false
 	}
@@ -33,28 +35,28 @@ func (ds *dataStreamer) Stream(samples [][2]float64) (n int, ok bool) {
 	return n, true
 }
 
-func (ds *dataStreamer) Err() error {
+func (ds *dataStreamer[S, P]) Err() error {
 	return nil
 }
 
-func (ds *dataStreamer) Len() int {
+func (ds *dataStreamer[S, P]) Len() int {
 	return len(ds.data)
 }
 
-func (ds *dataStreamer) Position() int {
+func (ds *dataStreamer[S, P]) Position() int {
 	return ds.pos
 }
 
-func (ds *dataStreamer) Seek(p int) error {
+func (ds *dataStreamer[S, P]) Seek(p int) error {
 	ds.pos = p
 	return nil
 }
 
 // collect drains Streamer s and returns all of the samples it streamed.
-func collect(s beep.Streamer) [][2]float64 {
+func collect[S beep.Size, P beep.Point[S]](s beep.Streamer[S, P]) []P {
 	var (
-		result [][2]float64
-		buf    [479][2]float64
+		result []P
+		buf    [479]P
 	)
 	for {
 		n, ok := s.Stream(buf[:])
@@ -68,11 +70,11 @@ func collect(s beep.Streamer) [][2]float64 {
 func TestTake(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		total := rand.Intn(1e5) + 1e4
-		s, data := randomDataStreamer(total)
+		s, data := randomDataStreamer[float64, beep.Stereo[float64]](total)
 		take := rand.Intn(total)
 
 		want := data[:take]
-		got := collect(beep.Take(take, s))
+		got := collect(beep.Take[float64, beep.Stereo[float64]](take, s))
 
 		if !reflect.DeepEqual(want, got) {
 			t.Error("Take not working correctly")
@@ -83,9 +85,9 @@ func TestTake(t *testing.T) {
 func TestLoop(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		for n := 0; n < 5; n++ {
-			s, data := randomDataStreamer(10)
+			s, data := randomDataStreamer[float64, beep.Stereo[float64]](10)
 
-			var want [][2]float64
+			var want []beep.Stereo[float64]
 			for j := 0; j < n; j++ {
 				want = append(want, data...)
 			}
@@ -101,14 +103,14 @@ func TestLoop(t *testing.T) {
 func TestSeq(t *testing.T) {
 	var (
 		n    = 7
-		s    = make([]beep.Streamer, n)
-		data = make([][][2]float64, n)
+		s    = make([]beep.Streamer[float64, beep.Stereo[float64]], n)
+		data = make([][]beep.Stereo[float64], n)
 	)
 	for i := range s {
-		s[i], data[i] = randomDataStreamer(rand.Intn(1e5) + 1e4)
+		s[i], data[i] = randomDataStreamer[float64, beep.Stereo[float64]](rand.Intn(1e5) + 1e4)
 	}
 
-	var want [][2]float64
+	var want []beep.Stereo[float64]
 	for _, d := range data {
 		want = append(want, d...)
 	}
@@ -121,13 +123,19 @@ func TestSeq(t *testing.T) {
 }
 
 func TestMix(t *testing.T) {
+	t.Run("float64-Stereo", runTestMix[float64, beep.Stereo[float64]])
+	t.Run("float32-Stereo", runTestMix[float32, beep.Stereo[float32]])
+	t.Run("float64-Mono", runTestMix[float64, beep.Mono[float64]])
+	t.Run("float32-Mono", runTestMix[float32, beep.Mono[float32]])
+}
+func runTestMix[S beep.Size, P beep.Point[S]](t *testing.T) {
 	var (
 		n    = 7
-		s    = make([]beep.Streamer, n)
-		data = make([][][2]float64, n)
+		s    = make([]beep.Streamer[S, P], n)
+		data = make([][]P, n)
 	)
 	for i := range s {
-		s[i], data[i] = randomDataStreamer(rand.Intn(1e5) + 1e4)
+		s[i], data[i] = randomDataStreamer[S, P](rand.Intn(1e5) + 1e4)
 	}
 
 	maxLen := 0
@@ -137,11 +145,15 @@ func TestMix(t *testing.T) {
 		}
 	}
 
-	want := make([][2]float64, maxLen)
-	for _, d := range data {
-		for i := range d {
-			want[i][0] += d[i][0]
-			want[i][1] += d[i][1]
+	want := make([]P, maxLen)
+	var cp P
+	ct := cp.Count()
+	for _, dd := range data {
+		for i := range dd {
+			w, d := want[i], dd[i]
+			for j := 0; j < ct; j++ {
+				w.Add(j, d.Get(j))
+			}
 		}
 	}
 
@@ -153,17 +165,23 @@ func TestMix(t *testing.T) {
 }
 
 func TestDup(t *testing.T) {
+	t.Run("float64-Stereo", runTestDup[float64, beep.Stereo[float64]])
+	t.Run("float32-Stereo", runTestDup[float32, beep.Stereo[float32]])
+	t.Run("float64-Mono", runTestDup[float64, beep.Mono[float64]])
+	t.Run("float32-Mono", runTestDup[float32, beep.Mono[float32]])
+}
+func runTestDup[S beep.Size, P beep.Point[S]](t *testing.T) {
 	for i := 0; i < 7; i++ {
-		s, data := randomDataStreamer(rand.Intn(1e5) + 1e4)
-		st, su := beep.Dup(s)
+		s, data := randomDataStreamer[S, P](rand.Intn(1e5) + 1e4)
+		st, su := beep.Dup[S, P](s)
 
-		var tData, uData [][2]float64
+		var tData, uData []P
 		for {
-			buf := make([][2]float64, rand.Intn(1e4))
+			buf := make([]P, rand.Intn(1e4))
 			tn, tok := st.Stream(buf)
 			tData = append(tData, buf[:tn]...)
 
-			buf = make([][2]float64, rand.Intn(1e4))
+			buf = make([]P, rand.Intn(1e4))
 			un, uok := su.Stream(buf)
 			uData = append(uData, buf[:un]...)
 

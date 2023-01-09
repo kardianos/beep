@@ -1,12 +1,55 @@
 package beep
 
-type Point[S Size] interface {
-	// [1]S | [2]S
-	[2]S
-}
-
 type Size interface {
 	float64 | float32
+}
+
+type Point[S Size] interface {
+	Count() int
+	Set(index int, v S) Point[S]
+	Add(index int, v S) Point[S]
+	Get(index int) S
+	Slice() []S
+}
+
+type Mono[S Size] [1]S
+
+func (p Mono[S]) Count() int {
+	return 1
+}
+func (p Mono[S]) Set(index int, v S) Point[S] {
+	p[index] = v
+	return p
+}
+func (p Mono[S]) Add(index int, v S) Point[S] {
+	p[index] += v
+	return p
+}
+func (p Mono[S]) Get(index int) S {
+	return p[index]
+}
+func (p Mono[S]) Slice() []S {
+	return p[:]
+}
+
+type Stereo[S Size] [2]S
+
+func (p Stereo[S]) Count() int {
+	return 2
+}
+func (p Stereo[S]) Set(index int, v S) Point[S] {
+	p[index] = v
+	return p
+}
+func (p Stereo[S]) Add(index int, v S) Point[S] {
+	p[index] += v
+	return p
+}
+func (p Stereo[S]) Get(index int) S {
+	return p[index]
+}
+func (p Stereo[S]) Slice() []S {
+	return p[:]
 }
 
 // Streamer is able to stream a finite or infinite sequence of audio samples.

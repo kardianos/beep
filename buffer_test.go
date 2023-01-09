@@ -9,13 +9,13 @@ import (
 )
 
 func TestFormatEncodeDecode(t *testing.T) {
-	formats := make(chan beep.Format)
+	formats := make(chan beep.Format[float64, beep.Stereo[float64]])
 	go func() {
 		defer close(formats)
 		for _, sampleRate := range []beep.SampleRate{100, 2347, 44100, 48000} {
 			for _, numChannels := range []int{1, 2, 3, 4} {
 				for _, precision := range []int{1, 2, 3, 4, 5, 6} {
-					formats <- beep.Format{
+					formats <- beep.Format[float64, beep.Stereo[float64]]{
 						SampleRate:  sampleRate,
 						NumChannels: numChannels,
 						Precision:   precision,
@@ -28,7 +28,7 @@ func TestFormatEncodeDecode(t *testing.T) {
 	for format := range formats {
 		for i := 0; i < 20; i++ {
 			deviation := 2.0 / (math.Pow(2, float64(format.Precision)*8) - 2)
-			sample := [2]float64{rand.Float64()*2 - 1, rand.Float64()*2 - 1}
+			sample := beep.Stereo[float64]{rand.Float64()*2 - 1, rand.Float64()*2 - 1}
 
 			tmp := make([]byte, format.Width())
 			format.EncodeSigned(tmp, sample)
@@ -61,11 +61,11 @@ func TestFormatEncodeDecode(t *testing.T) {
 }
 
 func TestBufferAppendPop(t *testing.T) {
-	formats := make(chan beep.Format)
+	formats := make(chan beep.Format[float64, beep.Stereo[float64]])
 	go func() {
 		defer close(formats)
 		for _, numChannels := range []int{1, 2, 3, 4} {
-			formats <- beep.Format{
+			formats <- beep.Format[float64, beep.Stereo[float64]]{
 				SampleRate:  44100,
 				NumChannels: numChannels,
 				Precision:   2,
@@ -75,7 +75,7 @@ func TestBufferAppendPop(t *testing.T) {
 
 	for format := range formats {
 		b := beep.NewBuffer(format)
-		b.Append(beep.Silence(768))
+		b.Append(beep.Silence[float64, beep.Stereo[float64]](768))
 		if b.Len() != 768 {
 			t.Fatalf("buffer length isn't equal to appended stream length: expected: %v, actual: %v (NumChannels: %v)", 768, b.Len(), format.NumChannels)
 		}

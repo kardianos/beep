@@ -100,6 +100,8 @@ func Seq[S Size, P Point[S]](s ...Streamer[S, P]) Streamer[S, P] {
 func Mix[S Size, P Point[S]](s ...Streamer[S, P]) Streamer[S, P] {
 	return StreamerFunc[S, P](func(samples []P) (n int, ok bool) {
 		var tmp [512]P
+		var cP P
+		ct := cP.Count()
 		for len(samples) > 0 {
 			toStream := len(tmp)
 			if toStream > len(samples) {
@@ -122,8 +124,9 @@ func Mix[S Size, P Point[S]](s ...Streamer[S, P]) Streamer[S, P] {
 				ok = ok || sok
 
 				for i := range tmp[:sn] {
-					samples[i][0] += tmp[i][0]
-					samples[i][1] += tmp[i][1]
+					for j := 0; j < ct; j++ {
+						samples[i].Add(j, tmp[i].Get(j))
+					}
 				}
 			}
 
